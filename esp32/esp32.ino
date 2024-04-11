@@ -31,7 +31,7 @@ bool lixeiraAberta = true;  // de inicio consideramos que a lixeira está aberta
 long lastPublishMillisUltrasonic = 0;
 long duracao;
 float distancia;
-const char *garbageid = "123a4";
+char garbageid[18];
 
 void ConectaNoWiFi() {
   Serial.print("Conectando ao WiFi");
@@ -41,6 +41,9 @@ void ConectaNoWiFi() {
     delay(500);
   }
   Serial.println("Conectado.");
+  Serial.println(WiFi.macAddress().length());
+  WiFi.macAddress().toCharArray(garbageid, 18);
+  Serial.printf("MAC: %s", garbageid);
 }
 
 void setupMQTT() {
@@ -55,19 +58,39 @@ void setupMQTT() {
 void callback(char *topic, byte *payload, unsigned int length) {
   Serial.print("Mensagem recebida no tópico: ");
   Serial.println(topic);
-
+  Serial.println(length);
   // converte o payload em uma string
-  String message;
+  // String message;
+  char message[length + 1];
   for (int i = 0; i < length; i++) {
-    message += (char)payload[i];
+    message[i] = (char)payload[i];
   }
+  message[length] = '\O';
 
   // imprime a mensagem recebida
   Serial.print("Mensagem: ");
   Serial.println(message);
+  StaticJsonDocument<200> doc;
+  DeserializationError error = deserializeJson(doc, message);
+  if (error) {
+    Serial.print("deserializeJson() failed: ");
+    Serial.println(error.c_str());
+    return;
+  }
 
-  controlarAtuadores(atoi(message.c_str()));  // converte a mensagem para um inteiro e passa para a função
-  controlarAcessoRFID(message[0]);            // passa o primeiro caractere da mensagem para a função
+  const char *responseCode = doc["responsecode"];  
+  const char *garbageId = doc["garbageid"];        
+
+  Serial.print("Response Code: ");
+  Serial.println(responseCode);
+  Serial.print("Garbage ID: ");
+  Serial.println(garbageId);
+
+  if (responseCode[0] == '0' || responseCode[0] == '1') {
+    controlarAtuadores(atoi(responseCode));  // converte a mensagem para um inteiro e passa para a função
+  } else if (responseCode[0] == 'n' || responseCode[0] == 'y'){
+    controlarAcessoRFID(responseCode[0]);  // passa o primeiro caractere da mensagem para a função
+  }
 }
 
 void conectaBrokerMQTT() {
@@ -99,7 +122,7 @@ void loop() {
     conectaBrokerMQTT();
   } else {
     unsigned long currentMillis = millis();
-    if (currentMillis - lastPublishMillisUltrasonic >= 5000) {
+    if (currentMillis - lastPublishMillisUltrasonic >= 10000) {
       lastPublishMillisUltrasonic = currentMillis;
       digitalWrite(trigPin, LOW);
       delayMicroseconds(3);
@@ -109,13 +132,14 @@ void loop() {
 
       duracao = pulseIn(echoPin, HIGH);
       distancia = duracao * 0.034 / 2;
-      StaticJsonDocument <200> doc;
+      StaticJsonDocument<200> doc;
       doc["distance"] = distancia;
-      doc["garbageid"] = "123a4";
+      doc["garbageid"] = garbageid;
       char jsonBuffer[512];
       serializeJson(doc, jsonBuffer);
       mqttClient.publish("ultrasonic/garbageflux", jsonBuffer);
       Serial.printf("distancia: %f\n", distancia);
+      Serial.println(lixeiraAberta);
     }
     if (mfrc522.PICC_IsNewCardPresent()) {
       mfrc522.PICC_ReadCardSerial();
@@ -125,9 +149,9 @@ void loop() {
         rfidData.concat(String(mfrc522.uid.uidByte[i], HEX));
       }
       Serial.println(rfidData);
-      StaticJsonDocument <200> doc;
+      StaticJsonDocument<200> doc;
       doc["id"] = rfidData;
-      doc["garbageid"] = "123a4";
+      doc["garbageid"] = garbageid;
       char jsonBuffer[512];
       serializeJson(doc, jsonBuffer);
       mqttClient.publish("rfid/garbageflux", jsonBuffer);
@@ -142,22 +166,23 @@ void loop() {
 }
 
 void controlarAtuadores(int estadoAtuador) {
+  Serial.println("Controlar atuadores");
   if (estadoAtuador == 1) {
     // enviado ordens para fechar a lixeira
     servo1.write(180);
     digitalWrite(Led, HIGH);
     lixeiraAberta = false;  // Lixeira está fechada
-  } else if (estadoAtuador == 0) {
+  } else {
     // Foi permitido deixar a lixeira aberta
     servo1.write(0);
     digitalWrite(Led, LOW);
     lixeiraAberta = true;  // Lixeira está aberta
-  } else {
   }
 }
 
 void controlarAcessoRFID(char estadoAtuador) {
   if (estadoAtuador == 'y' && !lixeiraAberta) {
+    Serial.println("Lixeira aberta");
     // Acesso permitido em uma lixeira fechada
     servo1.write(0);
     digitalWrite(Led, LOW);
