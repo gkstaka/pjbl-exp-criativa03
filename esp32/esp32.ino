@@ -31,7 +31,7 @@ bool lixeiraAberta = true;  // de inicio consideramos que a lixeira está aberta
 long lastPublishMillisUltrasonic = 0;
 long duracao;
 float distancia;
-char garbageid[18];
+char garbageId[18];
 
 void ConectaNoWiFi() {
   Serial.print("Conectando ao WiFi");
@@ -41,9 +41,12 @@ void ConectaNoWiFi() {
     delay(500);
   }
   Serial.println("Conectado.");
-  Serial.println(WiFi.macAddress().length());
-  WiFi.macAddress().toCharArray(garbageid, 18);
-  Serial.printf("MAC: %s", garbageid);
+  byte mac[6];
+  WiFi.macAddress(mac);
+  sprintf(garbageId, "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], mac[6]);
+  // Serial.println(WiFi.macAddress().length());
+  // WiFi.macAddress().toCharArray(garbageId, 18);
+  Serial.printf("MAC: %s", garbageId);
 }
 
 void setupMQTT() {
@@ -79,17 +82,15 @@ void callback(char *topic, byte *payload, unsigned int length) {
   }
 
   const char *responseCode = doc["responsecode"];  
-  const char *garbageId = doc["garbageid"];        
+  const char *garbageIdJson = doc["garbageid"];        
 
-  Serial.print("Response Code: ");
-  Serial.println(responseCode);
-  Serial.print("Garbage ID: ");
-  Serial.println(garbageId);
+  if(strcmp(garbageId, garbageIdJson) == 0){
+    if (responseCode[0] == '0' || responseCode[0] == '1') {
+      controlarAtuadores(atoi(responseCode));  // converte a mensagem para um inteiro e passa para a função
+    } else if (responseCode[0] == 'n' || responseCode[0] == 'y'){
+      controlarAcessoRFID(responseCode[0]);  // passa o primeiro caractere da mensagem para a função
+    }
 
-  if (responseCode[0] == '0' || responseCode[0] == '1') {
-    controlarAtuadores(atoi(responseCode));  // converte a mensagem para um inteiro e passa para a função
-  } else if (responseCode[0] == 'n' || responseCode[0] == 'y'){
-    controlarAcessoRFID(responseCode[0]);  // passa o primeiro caractere da mensagem para a função
   }
 }
 
@@ -134,7 +135,7 @@ void loop() {
       distancia = duracao * 0.034 / 2;
       StaticJsonDocument<200> doc;
       doc["distance"] = distancia;
-      doc["garbageid"] = garbageid;
+      doc["garbageid"] = garbageId;
       char jsonBuffer[512];
       serializeJson(doc, jsonBuffer);
       mqttClient.publish("ultrasonic/garbageflux", jsonBuffer);
@@ -151,11 +152,10 @@ void loop() {
       Serial.println(rfidData);
       StaticJsonDocument<200> doc;
       doc["id"] = rfidData;
-      doc["garbageid"] = garbageid;
+      doc["garbageid"] = garbageId;
       char jsonBuffer[512];
       serializeJson(doc, jsonBuffer);
       mqttClient.publish("rfid/garbageflux", jsonBuffer);
-      // mqttClient.publish("rfid/garbageflux", rfidData.c_str());
     }
 
     mqttClient.subscribe("actuator/garbageflux");
@@ -166,7 +166,6 @@ void loop() {
 }
 
 void controlarAtuadores(int estadoAtuador) {
-  Serial.println("Controlar atuadores");
   if (estadoAtuador == 1) {
     // enviado ordens para fechar a lixeira
     servo1.write(180);
