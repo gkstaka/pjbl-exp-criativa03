@@ -139,8 +139,6 @@ void loop() {
       char jsonBuffer[512];
       serializeJson(doc, jsonBuffer);
       mqttClient.publish("ultrasonic/garbageflux", jsonBuffer);
-      Serial.printf("distancia: %f\n", distancia);
-      Serial.println(lixeiraAberta);
     }
     if (mfrc522.PICC_IsNewCardPresent()) {
       mfrc522.PICC_ReadCardSerial();
